@@ -78,8 +78,116 @@ QB_MODEL = genanki.Model(
   <div class="serial-info">{{連問情報}}</div>
   {{/連問情報}}
 
-  <div class="choices">{{選択肢}}</div>
+  <div id="raw-choices" style="display:none">{{選択肢}}</div>
+  <div id="raw-answer" style="display:none">{{正解}}</div>
+  <div id="raw-accuracy" style="display:none">{{正答率}}</div>
+  <div id="choices-area"></div>
+  <div id="result-banner"></div>
 </div>
+
+<script>
+(function() {
+  var ce = document.getElementById('raw-choices');
+  var ae = document.getElementById('raw-answer');
+  var area = document.getElementById('choices-area');
+  var banner = document.getElementById('result-banner');
+  if (!ce || !ae || !area) return;
+  var answer = ae.textContent.trim();
+  var rawHTML = ce.innerHTML;
+  // 連問はプレーン表示にフォールバック
+  if (answer.indexOf(':') !== -1 && answer.indexOf('/') !== -1) {
+    area.innerHTML = '<div class="choices">' + rawHTML + '</div>';
+    return;
+  }
+  // 正解の文字を解析 ("c" or "a,c,e")
+  var correct = {};
+  answer.toLowerCase().split(',').forEach(function(a) {
+    var t = a.trim(); if (t) correct[t] = true;
+  });
+  var isMulti = Object.keys(correct).length > 1;
+  // 選択肢を行ごとに分割
+  var lines = rawHTML.split('<br>').map(function(l) {
+    return l.trim();
+  }).filter(function(l) {
+    return l.length > 0 && l.indexOf('\u2500\u2500') !== 0;
+  });
+  if (lines.length === 0) {
+    area.innerHTML = '<div class="choices">' + rawHTML + '</div>';
+    return;
+  }
+  var btns = [], done = false;
+  // 複数選択のヒント
+  if (isMulti) {
+    var hint = document.createElement('div');
+    hint.className = 'multi-hint';
+    hint.textContent = '\u8907\u6570\u9078\u629e \u2192 \u300c\u56de\u7b54\u3059\u308b\u300d\u3092\u30bf\u30c3\u30d7';
+    area.appendChild(hint);
+  }
+  lines.forEach(function(line) {
+    var btn = document.createElement('div');
+    btn.className = 'choice-btn';
+    btn.innerHTML = line;
+    var m = line.match(/^([a-e]) /i);
+    var letter = m ? m[1].toLowerCase() : '';
+    btn.setAttribute('data-letter', letter);
+    btn.addEventListener('click', function(e) {
+      e.stopPropagation(); if (done) return;
+      if (isMulti) {
+        btn.classList.toggle('selected');
+      } else {
+        done = true;
+        if (correct[letter]) {
+          btn.classList.add('correct'); showBanner(true);
+        } else {
+          btn.classList.add('wrong'); showCorrect(); showBanner(false);
+        }
+        lockAll();
+      }
+    });
+    btns.push(btn); area.appendChild(btn);
+  });
+  // 複数選択の確認ボタン
+  if (isMulti) {
+    var cfm = document.createElement('div');
+    cfm.className = 'confirm-btn';
+    cfm.textContent = '\u56de\u7b54\u3059\u308b';
+    cfm.addEventListener('click', function(e) {
+      e.stopPropagation(); if (done) return; done = true;
+      var sel = {};
+      btns.forEach(function(b) {
+        if (b.classList.contains('selected')) sel[b.getAttribute('data-letter')] = true;
+      });
+      var ok = Object.keys(correct).length === Object.keys(sel).length;
+      if (ok) Object.keys(correct).forEach(function(k) { if (!sel[k]) ok = false; });
+      btns.forEach(function(b) {
+        var l = b.getAttribute('data-letter');
+        if (correct[l]) b.classList.add('correct');
+        else if (sel[l]) b.classList.add('wrong');
+      });
+      showBanner(ok); lockAll(); cfm.style.display = 'none';
+      var h = area.querySelector('.multi-hint'); if (h) h.style.display = 'none';
+    });
+    area.appendChild(cfm);
+  }
+  function showCorrect() {
+    btns.forEach(function(b) {
+      if (correct[b.getAttribute('data-letter')]) b.classList.add('correct');
+    });
+  }
+  function lockAll() {
+    btns.forEach(function(b) { b.classList.add('done'); });
+  }
+  function showBanner(ok) {
+    var acc = document.getElementById('raw-accuracy');
+    var at = acc ? acc.textContent.trim() : '';
+    var ah = at ? '<div class="banner-accuracy">\u6b63\u7b54\u7387: ' + at + '</div>' : '';
+    banner.innerHTML = ok
+      ? '<div class="banner-correct">\u2b55 \u6b63\u89e3\uff01</div>' + ah
+      : '<div class="banner-wrong">\u274c \u4e0d\u6b63\u89e3</div>' + ah;
+    banner.style.display = 'block';
+  }
+})();
+</script>
 """,
             "afmt": """
 <div class="qb-card">
@@ -278,6 +386,59 @@ hr#answer {
 .keyword {
     font-weight: bold;
     color: #D32F2F;
+}
+/* ── 5択インタラクティブボタン ── */
+#raw-choices, #raw-answer, #raw-accuracy { display: none !important; }
+#choices-area { margin: 12px 0; }
+.choice-btn {
+    display: block; width: 100%; padding: 14px 16px; margin: 8px 0;
+    background: #ffffff; border: 2px solid #dee2e6; border-radius: 10px;
+    text-align: left; font-size: 15px; line-height: 1.5;
+    cursor: pointer; transition: all 0.15s ease;
+    -webkit-tap-highlight-color: transparent;
+    user-select: none; box-sizing: border-box;
+}
+.choice-btn:active { transform: scale(0.98); }
+.choice-btn.selected {
+    border-color: #4472C4; background: #e8f0fe;
+    box-shadow: 0 0 0 3px rgba(68,114,196,0.2);
+}
+.choice-btn.correct {
+    border-color: #28a745 !important; background: #d4edda !important; color: #155724;
+}
+.choice-btn.correct::after { content: ' \2713'; font-weight: bold; color: #28a745; }
+.choice-btn.wrong {
+    border-color: #dc3545 !important; background: #f8d7da !important; color: #721c24;
+}
+.choice-btn.wrong::after { content: ' \2717'; color: #dc3545; }
+.choice-btn.done { pointer-events: none; }
+.choice-btn.done:not(.correct):not(.wrong):not(.selected) { opacity: 0.4; }
+.multi-hint {
+    text-align: center; color: #856404; font-size: 13px;
+    margin: 8px 0; padding: 8px; background: #fff3cd; border-radius: 6px;
+}
+.confirm-btn {
+    display: block; width: 100%; padding: 14px; margin: 12px 0;
+    background: #4472C4; color: #fff; border: none; border-radius: 10px;
+    font-size: 16px; font-weight: bold; text-align: center;
+    cursor: pointer; -webkit-tap-highlight-color: transparent;
+}
+.confirm-btn:active { background: #3461b0; transform: scale(0.98); }
+#result-banner { display: none; margin: 16px 0; text-align: center; }
+.banner-correct {
+    font-size: 26px; font-weight: bold; color: #28a745;
+    padding: 20px; background: #d4edda; border-radius: 12px;
+    animation: popIn 0.3s ease;
+}
+.banner-wrong {
+    font-size: 26px; font-weight: bold; color: #dc3545;
+    padding: 20px; background: #f8d7da; border-radius: 12px;
+    animation: popIn 0.3s ease;
+}
+.banner-accuracy { font-size: 14px; color: #666; margin-top: 6px; }
+@keyframes popIn {
+    0% { transform: scale(0.8); opacity: 0; }
+    100% { transform: scale(1); opacity: 1; }
 }
 """,
 )
